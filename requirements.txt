@@ -1,0 +1,5 @@
+psycopg2-binary
+anthropic
+slack-bolt
+python-dotenv
+requests
