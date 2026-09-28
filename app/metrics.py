@@ -304,35 +304,55 @@ def get_opportunities_by_sales_lead(stage: str | None = None) -> dict:
 
 def get_pipeline(_month: str | None = None) -> dict:
     """
-    'Active Pipeline' del dashboard: oportunidades abiertas que ya pasaron el
-    filtro inicial de Sourcing (todavia armando lista de candidatos/prospectos
-    no cuenta como pipeline real todavia). No depende del mes. Verificado contra
-    el dashboard (34 Staffing + 15 Recruiting al momento de revisar, coincide
-    con el orden de magnitud que vio Lara un dia antes: 33 + 16).
+    'Active Pipeline' del dashboard: foto actual de las oportunidades abiertas.
+    Usa el numero OFICIAL del dashboard (tarjeta gr_kpi_active_pipeline) en vez
+    de una formula propia, para coincidir siempre con lo que ve el equipo en
+    pantalla. Ojo: la definicion del dashboard incluye ciertas etapas (Sourcing,
+    Interviewing, Negotiating, Stop) y excluye otras (Deep Dive, NDA Sent) -- no
+    es simplemente "todo lo no cerrado", asi que no reconstruir esto en SQL. No
+    depende del mes.
     """
-    rows = run_query(
-        """
-        SELECT opp_stage, opp_model, COUNT(*) AS count,
-               COALESCE(SUM(expected_revenue), 0) AS weighted_value
-        FROM opportunity
-        WHERE opp_stage NOT IN ('Close Win', 'Closed Lost', 'Stop', 'Sourcing')
-        GROUP BY opp_stage, opp_model
-        ORDER BY opp_stage
-        """
-    )
-    total_open = sum(r["count"] for r in rows)
-    total_value = sum(r["weighted_value"] or 0 for r in rows)
-    por_modelo = {}
-    for r in rows:
-        m = r["opp_model"] or "Sin modelo"
-        por_modelo[m] = por_modelo.get(m, 0) + r["count"]
+    kpi = get_dashboard_chart("gr_kpi_active_pipeline")["rows"][0]
+
+    # Desglose por etapa/modelo/tipo desde la tabla de detalle del dashboard
+    # (misma fuente que el KPI, para que las etapas coincidan con su definicion).
+    por_etapa: dict = {}
+    por_modelo: dict = {}
+    try:
+        detalle = get_dashboard_chart("gr_table_active_pipeline_detail")["rows"]
+        for r in detalle:
+            etapa = r.get("opp_stage") or "Sin etapa"
+            modelo = r.get("opp_model") or "Sin modelo"
+            tipo = (r.get("opp_type") or "").lower()
+            slot = por_etapa.setdefault(
+                etapa, {"total": 0, "new": 0, "replacement": 0}
+            )
+            slot["total"] += 1
+            if tipo == "replacement":
+                slot["replacement"] += 1
+            else:
+                slot["new"] += 1
+            por_modelo[modelo] = por_modelo.get(modelo, 0) + 1
+    except Exception:  # noqa: BLE001 -- el KPI ya trae el total; el detalle es extra
+        por_etapa = {}
+        por_modelo = {
+            "Staffing": kpi.get("pipeline_count_staffing"),
+            "Recruiting": kpi.get("pipeline_count_recruiting"),
+        }
+
     return {
         "summary": {
-            "total_open_opportunities": total_open,
-            "total_weighted_value": total_value,
+            "total_open_opportunities": kpi.get("pipeline_count"),
+            "new": kpi.get("pipeline_count_new"),
+            "replacement": kpi.get("pipeline_count_replacement"),
             "por_modelo": por_modelo,
+            "total_expected_value": kpi.get("pipeline_revenue"),
+            "total_weighted_value": kpi.get("pipeline_revenue_weighted"),
+            "win_rate_total_pct": kpi.get("win_rate_total_pct"),
+            "corte": kpi.get("corte"),
+            "fuente": "dashboard oficial (tarjeta Active Pipeline)",
         },
-        "detail": rows,
+        "por_etapa": por_etapa,
     }
 
 
