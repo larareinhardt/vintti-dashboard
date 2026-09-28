@@ -20,8 +20,19 @@ LOG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "aud
 def log_event(kind: str, **fields) -> None:
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
     entry = {"timestamp": datetime.now(timezone.utc).isoformat(), "kind": kind, **fields}
+    line = json.dumps(entry, ensure_ascii=False, default=str)
+
+    # Ademas del archivo, lo imprimimos en pantalla (stdout) con flush=True para
+    # que quede visible en los logs del server (ej: Railway) sin depender del
+    # archivo local, que se pierde en cada redeploy. flush asegura que aparezca
+    # al instante y no quede en el buffer de Python.
+    try:
+        print("[audit] " + line, flush=True)
+    except Exception:  # noqa: BLE001
+        pass  # el log nunca debe romper una respuesta real al usuario
+
     try:
         with open(LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+            f.write(line + "\n")
     except Exception:  # noqa: BLE001
         pass  # el log nunca debe romper una respuesta real al usuario
